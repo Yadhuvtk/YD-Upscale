@@ -1,4 +1,4 @@
-from .config import parse_config
+from .config import parse_config, load_config
 from .logger import setup_logger
 from .image_io import read_image, save_image
 from .device import get_device

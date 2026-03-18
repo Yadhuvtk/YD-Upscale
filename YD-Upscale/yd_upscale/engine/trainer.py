@@ -1,5 +1,4 @@
 import torch  # pyre-ignore[21]
-import torch.nn as nn  # pyre-ignore[21]
 from yd_upscale.utils.device import get_device  # pyre-ignore[21]
 
 class Trainer:

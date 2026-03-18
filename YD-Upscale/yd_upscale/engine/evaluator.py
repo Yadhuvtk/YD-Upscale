@@ -1,6 +1,5 @@
 import torch
 from pathlib import Path
-from yd_upscale.utils.registry import METRICS
 
 class Evaluator:
     def __init__(self, metrics_list, device):

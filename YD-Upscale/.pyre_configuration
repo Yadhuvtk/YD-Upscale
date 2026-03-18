@@ -1,0 +1,18 @@
+{
+  "source_directories": [
+    {
+      "root": "."
+    }
+  ],
+  "exclude": [
+    "runtime/",
+    "build/",
+    "dist/",
+    "yd_upscale.egg-info/",
+    ".venv/",
+    "checkpoints/",
+    "outputs/",
+    "logs/",
+    "data/"
+  ]
+}

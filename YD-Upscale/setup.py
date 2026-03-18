@@ -5,7 +5,7 @@ setup(
     version="0.1.0",
     author="Yadhukrishna",
     description="Clean, modular, production-ready AI image upscaler project for anime, illustration, and text-preserving artwork.",
-    packages=find_packages(),
+    packages=find_packages(exclude=["runtime", "runtime.*", "tests", "tests.*"]),
     python_requires=">=3.8",
     install_requires=[
         "torch>=2.0.0",

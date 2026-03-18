@@ -4,3 +4,4 @@ from .pixel_loss import L1Loss, MSELoss
 from .edge_loss import EdgeLoss
 from .perceptual_loss import PerceptualLoss
 from .gan_loss import GANLoss
+from .text_consistency_loss import TextConsistencyLoss

@@ -11,9 +11,12 @@ from yd_upscale.models.model_factory import create_model  # pyre-ignore[21]
 from yd_upscale.data.dataloader_factory import create_dataset, build_dataloader  # pyre-ignore[21]
 from yd_upscale.losses.loss_factory import build_loss  # pyre-ignore[21]
 from yd_upscale.engine.trainer import Trainer  # pyre-ignore[21]
-from yd_upscale.engine.checkpoint import save_checkpoint, load_checkpoint  # pyre-ignore[21]
+from yd_upscale.engine.checkpoint import save_checkpoint  # pyre-ignore[21]
 from yd_upscale.engine.scheduler_factory import build_scheduler  # pyre-ignore[21]
-from torch.utils.tensorboard import SummaryWriter  # pyre-ignore[21]
+try:
+    from torch.utils.tensorboard import SummaryWriter  # pyre-ignore[21]
+except ImportError:
+    SummaryWriter = None  # type: ignore[assignment,misc]
 
 def main():
     parser = argparse.ArgumentParser()
@@ -51,7 +54,7 @@ def main():
     # Tensorboard Logging
     use_tb = opt.get('logger', {}).get('use_tb_logger', False)
     tb_writer = None
-    if use_tb:
+    if use_tb and SummaryWriter is not None:
         tb_writer = SummaryWriter(log_dir=f"logs/tensorboard/{opt['name']}")
     
     logger.info("Starting training loop...")
