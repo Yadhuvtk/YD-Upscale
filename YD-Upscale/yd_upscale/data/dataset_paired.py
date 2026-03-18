@@ -1,60 +1,63 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable
+
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
-from pathlib import Path
-import random
-import cv2
+from torchvision import transforms
 
-from yd_upscale.utils.registry import DATASETS
-from yd_upscale.utils.image_io import read_image
-from .degradations import degrade_image
-from .transforms import img2tensor
 
-@DATASETS.register
-class PairedDataset(Dataset):
-    def __init__(self, opt):
-        self.opt = opt
-        self.hr_paths = []
-        
-        manifest_file = opt.get('manifest_file')
-        if manifest_file and Path(manifest_file).exists():
-            with open(manifest_file, 'r') as f:
-                self.hr_paths = [Path(opt['dataroot_hr']) / line.strip() for line in f if line.strip()]
-        else:
-            self.hr_paths = [p for p in sorted(list(Path(opt['dataroot_hr']).glob('*.*'))) if p.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp']]
-            
-        self.patch_size = opt.get('patch_size', 256)
-        # Using 4 as default, in a broader scope pass from model_opt
-        self.scale = 4 
-        self.degradations = opt.get('degradations', {})
+class PairedImageDataset(Dataset):
+    def __init__(
+        self,
+        lr_manifest: str | Path,
+        hr_manifest: str | Path,
+        transform: Callable | None = None,
+    ) -> None:
+        self.lr_paths = self._read_manifest(lr_manifest)
+        self.hr_paths = self._read_manifest(hr_manifest)
 
-    def __len__(self):
-        return max(1, len(self.hr_paths))  # avoid 0 len for empty dirs during stubs
+        if len(self.lr_paths) != len(self.hr_paths):
+            raise ValueError(
+                f"Mismatch between LR ({len(self.lr_paths)}) and HR ({len(self.hr_paths)}) samples"
+            )
 
-    def __getitem__(self, index):
-        if not self.hr_paths:
-            # Return dummy tensor if folder is completely empty during scaffold init
-            return {
-                'lr': torch.zeros(3, 64, 64),
-                'hr': torch.zeros(3, 256, 256),
-                'hr_path': 'dummy.png'
-            }
+        self.transform = transform or transforms.ToTensor()
 
+    def _read_manifest(self, manifest_path: str | Path) -> list[Path]:
+        path = Path(manifest_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Manifest not found: {path}")
+
+        with path.open("r", encoding="utf-8") as f:
+            lines = [Path(line.strip()) for line in f if line.strip()]
+
+        if not lines:
+            raise ValueError(f"Manifest is empty: {path}")
+
+        return lines
+
+    def __len__(self) -> int:
+        return len(self.lr_paths)
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor | str]:
+        lr_path = self.lr_paths[index]
         hr_path = self.hr_paths[index]
-        img_hr = read_image(hr_path)
-        
-        if self.patch_size:
-            h, w = img_hr.shape[:2]
-            if h < self.patch_size or w < self.patch_size:
-                img_hr = cv2.resize(img_hr, (max(self.patch_size, w), max(self.patch_size, h)))
-                h, w = img_hr.shape[:2]
 
-            top = random.randint(0, h - self.patch_size)
-            left = random.randint(0, w - self.patch_size)
-            img_hr = img_hr[top:top + self.patch_size, left:left + self.patch_size, :]
-            
-        img_lr = degrade_image(img_hr, self.degradations, self.scale)
-        
-        img_hr = img2tensor(img_hr)
-        img_lr = img2tensor(img_lr)
+        with Image.open(lr_path) as lr_img:
+            lr_img = lr_img.convert("RGB")
 
-        return {'lr': img_lr, 'hr': img_hr, 'hr_path': str(hr_path)}
+        with Image.open(hr_path) as hr_img:
+            hr_img = hr_img.convert("RGB")
+
+        lr_tensor = self.transform(lr_img)
+        hr_tensor = self.transform(hr_img)
+
+        return {
+            "lr": lr_tensor,
+            "hr": hr_tensor,
+            "lr_path": str(lr_path),
+            "hr_path": str(hr_path),
+        }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Iterable
@@ -33,12 +34,31 @@ def verify_png(image_path: Path) -> tuple[int, int]:
         return img.width, img.height
 
 
+def resolve_inkscape_path(inkscape_path: str) -> str:
+    if inkscape_path.lower() == "inkscape":
+        resolved = shutil.which("inkscape")
+        if resolved is None:
+            raise FileNotFoundError(
+                "Inkscape executable not found. Pass --inkscape-path or add Inkscape to PATH."
+            )
+        return resolved
+
+    candidate = Path(inkscape_path)
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"Inkscape executable not found at: {candidate}. "
+            "Pass a valid --inkscape-path."
+        )
+    return str(candidate)
+
+
 def render_with_inkscape(
     svg_path: Path,
     png_path: Path,
     size: int,
-    inkscape_path: str = "inkscape",
+    inkscape_path: str,
     background: str = "white",
+    fit_mode: str = "pad",
 ) -> None:
     png_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -47,25 +67,71 @@ def render_with_inkscape(
         str(svg_path),
         "--export-type=png",
         f"--export-filename={png_path}",
-        f"--export-width={size}",
-        f"--export-height={size}",
     ]
+
+    if fit_mode in {"width", "pad"}:
+        cmd.append(f"--export-width={size}")
+    elif fit_mode == "height":
+        cmd.append(f"--export-height={size}")
+    else:
+        raise ValueError(f"Unsupported fit_mode: {fit_mode}")
 
     if background == "white":
         cmd.extend(["--export-background=white", "--export-background-opacity=1.0"])
     elif background == "transparent":
         cmd.extend(["--export-background-opacity=0.0"])
+    else:
+        raise ValueError(f"Unsupported background: {background}")
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Inkscape render timed out after 60 seconds: {svg_path}")
 
     if result.returncode != 0:
-        stderr = result.stderr.strip() or "Unknown Inkscape error"
+        stderr = result.stderr.strip() or result.stdout.strip() or "Unknown Inkscape error"
         raise RuntimeError(stderr)
+
+
+def pad_to_square(image_path: Path, size: int, background: str) -> tuple[int, int]:
+    with Image.open(image_path) as img:
+        img.load()
+
+        if background == "transparent":
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
+        else:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            canvas = Image.new("RGB", (size, size), (255, 255, 255))
+
+        src_w, src_h = img.size
+
+        if src_w > size or src_h > size:
+            scale = min(size / src_w, size / src_h)
+            new_w = max(1, int(round(src_w * scale)))
+            new_h = max(1, int(round(src_h * scale)))
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+            src_w, src_h = img.size
+
+        offset_x = (size - src_w) // 2
+        offset_y = (size - src_h) // 2
+
+        if img.mode == "RGBA":
+            canvas.paste(img, (offset_x, offset_y), img)
+        else:
+            canvas.paste(img, (offset_x, offset_y))
+
+        canvas.save(image_path)
+
+    return verify_png(image_path)
 
 
 def write_jsonl_record(file_obj, record: dict) -> None:
@@ -81,7 +147,15 @@ def iter_svg_files(files: list[Path], limit: int | None) -> Iterable[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Render SVG files into PNG images for YD-Upscale dataset preparation."
+        description=(
+            "Render SVG files into PNG images for YD-Upscale dataset preparation.\n\n"
+            "Examples:\n"
+            r'  python scripts\render_svg_to_png.py --limit 10 --size 2048 '
+            r'--inkscape-path "C:\Program Files\Inkscape\bin\inkscape.exe"' "\n"
+            r'  python scripts\render_svg_to_png.py --size 2048 --fit-mode pad '
+            r'--background white --inkscape-path "C:\Program Files\Inkscape\bin\inkscape.exe"'
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "--input",
@@ -111,7 +185,7 @@ def main() -> None:
         "--size",
         type=int,
         default=2048,
-        help="Square PNG output size. Default: 2048",
+        help="Target render size. Default: 2048",
     )
     parser.add_argument(
         "--inkscape-path",
@@ -124,6 +198,17 @@ def main() -> None:
         choices=["white", "transparent"],
         default="white",
         help="PNG background mode. Default: white",
+    )
+    parser.add_argument(
+        "--fit-mode",
+        choices=["width", "height", "pad"],
+        default="pad",
+        help=(
+            "How to preserve aspect ratio.\n"
+            "width: render with only export-width\n"
+            "height: render with only export-height\n"
+            "pad: render proportionally using width, then pad to square"
+        ),
     )
     parser.add_argument(
         "--overwrite",
@@ -153,6 +238,8 @@ def main() -> None:
     if not input_dir.exists():
         raise FileNotFoundError(f"Input folder not found: {input_dir}")
 
+    resolved_inkscape = resolve_inkscape_path(args.inkscape_path)
+
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     failures_path.parent.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -175,11 +262,21 @@ def main() -> None:
             rel_path = svg_path.relative_to(input_dir)
             png_path = output_dir / rel_path.with_suffix(".png")
 
+            logging.info("Rendering [%s/%s]: %s", index, total_target, svg_path)
+
             try:
                 if png_path.exists() and not args.overwrite:
                     try:
                         width, height = verify_png(png_path)
                         skipped_count += 1
+                        logging.info(
+                            "Skipped existing [%s/%s]: %s (%sx%s)",
+                            index,
+                            total_target,
+                            png_path,
+                            width,
+                            height,
+                        )
                         write_jsonl_record(
                             manifest_f,
                             {
@@ -196,11 +293,28 @@ def main() -> None:
                             svg_path=svg_path,
                             png_path=png_path,
                             size=args.size,
-                            inkscape_path=args.inkscape_path,
+                            inkscape_path=resolved_inkscape,
                             background=args.background,
+                            fit_mode=args.fit_mode,
                         )
-                        width, height = verify_png(png_path)
+                        if args.fit_mode == "pad":
+                            width, height = pad_to_square(
+                                png_path,
+                                size=args.size,
+                                background=args.background,
+                            )
+                        else:
+                            width, height = verify_png(png_path)
+
                         success_count += 1
+                        logging.info(
+                            "Re-rendered [%s/%s]: %s (%sx%s)",
+                            index,
+                            total_target,
+                            png_path,
+                            width,
+                            height,
+                        )
                         write_jsonl_record(
                             manifest_f,
                             {
@@ -216,11 +330,28 @@ def main() -> None:
                         svg_path=svg_path,
                         png_path=png_path,
                         size=args.size,
-                        inkscape_path=args.inkscape_path,
+                        inkscape_path=resolved_inkscape,
                         background=args.background,
+                        fit_mode=args.fit_mode,
                     )
-                    width, height = verify_png(png_path)
+                    if args.fit_mode == "pad":
+                        width, height = pad_to_square(
+                            png_path,
+                            size=args.size,
+                            background=args.background,
+                        )
+                    else:
+                        width, height = verify_png(png_path)
+
                     success_count += 1
+                    logging.info(
+                        "Rendered [%s/%s]: %s (%sx%s)",
+                        index,
+                        total_target,
+                        png_path,
+                        width,
+                        height,
+                    )
                     write_jsonl_record(
                         manifest_f,
                         {
@@ -234,6 +365,7 @@ def main() -> None:
 
             except Exception as exc:
                 fail_count += 1
+                logging.error("Failed [%s/%s]: %s | %s", index, total_target, svg_path, exc)
                 write_jsonl_record(
                     failures_f,
                     {
@@ -242,7 +374,6 @@ def main() -> None:
                         "stage": "render_or_verify",
                     },
                 )
-                logging.error("Failed: %s | %s", svg_path, exc)
 
             if index % 100 == 0 or index == total_target:
                 logging.info(

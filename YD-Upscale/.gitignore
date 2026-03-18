@@ -52,6 +52,7 @@ outputs/*
 !outputs/comparisons/.gitkeep
 !outputs/benchmark_reports/.gitkeep
 
+data
 # data (ignore files in directories, but keep directories)
 data/raw/*/*
 !data/raw/train_hr/.gitkeep
