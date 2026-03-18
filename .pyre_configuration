@@ -1,0 +1,16 @@
+{
+  "source_directories": [
+    "YD-Upscale",
+    "YD-Upscale/scripts"
+  ],
+  "search_path": [
+    "c:\\users\\idaiteam\\miniforge3\\lib\\site-packages",
+    "YD-Upscale"
+  ],
+  "exclude": [
+    "YD-Upscale/build",
+    "YD-Upscale/dist",
+    "YD-Upscale/yd_upscale.egg-info",
+    "YD-Upscale/__pycache__"
+  ]
+}

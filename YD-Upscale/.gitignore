@@ -1,0 +1,73 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Logs and databases
+*.log
+logs/*
+!logs/train/.gitkeep
+!logs/val/.gitkeep
+!logs/tensorboard/.gitkeep
+wandb/
+
+# checkpoints and outputs
+checkpoints/*
+!checkpoints/pretrain/.gitkeep
+!checkpoints/gan/.gitkeep
+!checkpoints/export/.gitkeep
+outputs/*
+!outputs/inference/.gitkeep
+!outputs/comparisons/.gitkeep
+!outputs/benchmark_reports/.gitkeep
+
+# data (ignore files in directories, but keep directories)
+data/raw/*/*
+!data/raw/train_hr/.gitkeep
+!data/raw/val_hr/.gitkeep
+!data/raw/test_hr/.gitkeep
+data/manifests/*.txt
+data/prepared/*/*
+!data/prepared/previews/.gitkeep
+!data/prepared/debug_pairs/.gitkeep
+data/samples/*/*
+!data/samples/input/.gitkeep
+!data/samples/output/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+
+# Config overrides
+configs/local_*.yaml

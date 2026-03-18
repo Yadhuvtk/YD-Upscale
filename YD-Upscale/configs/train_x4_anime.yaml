@@ -1,0 +1,70 @@
+# Identical to train_x4_art_text for now, can be tuned for anime specifics later
+name: train_x4_anime_v1
+model_type: RRDBNet
+scale: 4
+use_amp: true
+
+datasets:
+  train:
+    name: Anime_Train
+    type: PairedDataset
+    dataroot_hr: data/raw/train_hr
+    manifest_file: data/manifests/train.txt
+    patch_size: 256
+    batch_size: 16
+    num_workers: 4
+    use_shuffle: true
+    degradations:
+      resize_range: [0.8, 1.0] # Anime tends to need less aggressive downscaling than art
+      blur_prob: 0.3 # Less blur for cell-shaded anime art
+      blur_sigma: [0.2, 1.0]
+      noise_prob: 0.2
+      noise_range: [1.0, 5.0] # Heavy noise is rare in anime
+      jpeg_prob: 0.9 # JPEG compression is the main artifact for anime
+      jpeg_range: [50, 90]
+  val:
+    name: Anime_Val
+    type: PairedDataset
+    dataroot_hr: data/raw/val_hr
+    manifest_file: data/manifests/val.txt
+    patch_size: 256
+    batch_size: 4
+    num_workers: 4
+    use_shuffle: false
+
+network_g:
+  type: RRDBNet
+  num_in_ch: 3
+  num_out_ch: 3
+  num_feat: 64
+  num_block: 23
+
+train:
+  ema_decay: 0.999
+  optim_g:
+    type: Adam
+    lr: !!float 2e-4
+    weight_decay: 0
+    betas: [0.9, 0.99]
+  scheduler:
+    type: CosineAnnealingRestartLR
+    periods: [250000, 250000, 250000, 250000]
+    restart_weights: [1, 1, 1, 1]
+    eta_min: !!float 1e-7
+  total_iter: 1000000
+  warmup_iter: -1
+
+  losses:
+    pixel_opt:
+      type: L1Loss
+      loss_weight: 1.0
+    edge_opt:
+      type: EdgeLoss
+      edge_type: sobel
+      loss_weight: 0.5 # Anime favors strong, flat, sharp outlines
+
+logger:
+  print_freq: 100
+  save_checkpoint_freq: 5000
+  use_tb_logger: true
+  wandb: false

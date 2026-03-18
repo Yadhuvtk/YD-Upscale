@@ -1,0 +1,18 @@
+name: infer_x4
+scale: 4
+
+network_g:
+  type: RRDBNet
+  num_in_ch: 3
+  num_out_ch: 3
+  num_feat: 64
+  num_block: 23
+  pretrained_path: checkpoints/export/model_x4.pth
+
+infer:
+  input_dir: data/samples/input
+  output_dir: outputs/inference
+  tile: 400
+  tile_pad: 10
+  pre_pad: 10
+  half: true

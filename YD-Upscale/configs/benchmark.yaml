@@ -1,0 +1,23 @@
+name: benchmark_x4
+scale: 4
+
+network_g:
+  type: RRDBNet
+  num_in_ch: 3
+  num_out_ch: 3
+  num_feat: 64
+  num_block: 23
+  pretrained_path: checkpoints/export/model_x4.pth
+
+datasets:
+  test:
+    name: DemoTest
+    type: PairedDataset
+    dataroot_hr: data/raw/test_hr
+    manifest_file: data/manifests/test.txt
+
+benchmark:
+  output_dir: outputs/benchmark_reports
+  metrics:
+    - PSNR
+    - SSIM
