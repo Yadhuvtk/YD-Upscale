@@ -1,7 +1,7 @@
-from .dataset_paired import PairedImageDataset
-from .dataloader_factory import build_paired_dataloader
+from yd_upscale.data.dataset_paired import PairedImageDataset
+from yd_upscale.data.dataloader_factory import build_train_val_dataloaders
 
 __all__ = [
     "PairedImageDataset",
-    "build_paired_dataloader",
+    "build_train_val_dataloaders",
 ]

@@ -1,28 +1,54 @@
 from __future__ import annotations
 
+from pathlib import Path
 from torch.utils.data import DataLoader
-from torchvision import transforms
 
 from yd_upscale.data.dataset_paired import PairedImageDataset
 
 
-def build_paired_dataloader(
-    lr_manifest: str,
-    hr_manifest: str,
-    batch_size: int,
-    shuffle: bool,
-    num_workers: int,
-) -> DataLoader:
-    dataset = PairedImageDataset(
-        lr_manifest=lr_manifest,
-        hr_manifest=hr_manifest,
-        transform=transforms.ToTensor(),
+def build_train_val_dataloaders(
+    manifest_dir: str | Path,
+    batch_size: int = 8,
+    num_workers: int = 4,
+    scale: int = 4,
+    patch_size_lr: int = 128,
+):
+    manifest_dir = Path(manifest_dir)
+
+    train_dataset = PairedImageDataset(
+        lr_list_file=manifest_dir / "train_lr.txt",
+        hr_list_file=manifest_dir / "train_hr.txt",
+        scale=scale,
+        patch_size_lr=patch_size_lr,
+        is_train=True,
+        augment=True,
     )
 
-    return DataLoader(
-        dataset,
+    val_dataset = PairedImageDataset(
+        lr_list_file=manifest_dir / "val_lr.txt",
+        hr_list_file=manifest_dir / "val_hr.txt",
+        scale=scale,
+        patch_size_lr=patch_size_lr,
+        is_train=False,
+        augment=False,
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=True,
         num_workers=num_workers,
         pin_memory=True,
+        drop_last=True,
     )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=False,
+    )
+
+    return train_loader, val_loader

@@ -1,4 +1,3 @@
-from .model_factory import create_model
-from .rrdbnet import RRDBNet
-from .discriminator import UNetDiscriminatorSN
-from .text_edge_head import TextEdgeHead
+from yd_upscale.models.rrdbnet import RRDBNet
+
+__all__ = ["RRDBNet"]
