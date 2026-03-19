@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import time
 
 import torch
@@ -8,9 +9,11 @@ import torch.nn as nn
 from torch.optim import Adam
 from torch.amp import autocast, GradScaler
 
+# Make project root importable
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from yd_upscale.data.dataloader_factory import build_train_val_dataloaders
-#from yd_upscale.models.rrdbnet import RRDBNet
-from realesrgan.archs.srvgg_arch import SRVGGNetCompact
+from yd_upscale.models.srvggnet import SRVGGNetCompact
 
 
 def validate(model, val_loader, criterion, device, use_amp=True):
@@ -34,7 +37,7 @@ def validate(model, val_loader, criterion, device, use_amp=True):
 
 
 def main():
-    project_root = Path(r"E:\Yadhu Projects\YD-Upscale\YD-Upscale")
+    project_root = Path(__file__).resolve().parent
     manifest_dir = project_root / "data" / "manifests"
     checkpoint_dir = project_root / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -49,6 +52,9 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+    print(f"Project root: {project_root}")
+    print(f"Manifest dir: {manifest_dir}")
+    print(f"Checkpoint dir: {checkpoint_dir}")
 
     train_loader, val_loader = build_train_val_dataloaders(
         manifest_dir=manifest_dir,
@@ -59,17 +65,19 @@ def main():
     )
 
     model = SRVGGNetCompact(
-    num_in_ch=3,
-    num_out_ch=3,
-    num_feat=64,
-    num_conv=32,
-    upscale=scale,
-    act_type="prelu",
-).to(device)
+        num_in_ch=3,
+        num_out_ch=3,
+        num_feat=64,
+        num_conv=32,
+        upscale=scale,
+        act_type="prelu",
+    ).to(device)
 
     criterion = nn.L1Loss()
     optimizer = Adam(model.parameters(), lr=lr_rate, betas=(0.9, 0.99))
     scaler = GradScaler("cuda", enabled=use_amp)
+
+    best_val_loss = float("inf")
 
     print(f"Train samples: {len(train_loader.dataset)}")
     print(f"Val samples:   {len(val_loader.dataset)}")
@@ -117,19 +125,23 @@ def main():
             f"Time: {elapsed/60:.2f} min\n"
         )
 
-        #ckpt_path = checkpoint_dir / f"yd_upscale_rrdb_x4_epoch_{epoch}.pth"
-        ckpt_path = checkpoint_dir / f"YD_UPSCALE_x4_epoch_{epoch}.pth"
-        torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "train_loss": train_loss,
-                "val_loss": val_loss,
-            },
-            ckpt_path,
-        )
-        print(f"Saved checkpoint: {ckpt_path}")
+        epoch_ckpt_path = checkpoint_dir / f"YD_UPSCALE_srvgg_x4_epoch_{epoch}.pth"
+        state = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+        }
+
+        torch.save(state, epoch_ckpt_path)
+        print(f"Saved checkpoint: {epoch_ckpt_path}")
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_ckpt_path = checkpoint_dir / "YD_UPSCALE_srvgg_x4_best.pth"
+            torch.save(state, best_ckpt_path)
+            print(f"Saved best checkpoint: {best_ckpt_path}")
 
 
 if __name__ == "__main__":
