@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 import torchvision.transforms.functional as TF
-
+from realesrgan.archs.srvgg_arch import SRVGGNetCompact
 from yd_upscale.models.rrdbnet import RRDBNet
 
 
@@ -13,8 +13,8 @@ def main():
     testing_dir = Path(__file__).resolve().parent
     project_root = testing_dir.parent
 
-    checkpoint_path = project_root / "checkpoints" / "yd_upscale_rrdb_x4_epoch_1.pth"
-    input_path = testing_dir / "Tests.jpg"
+    checkpoint_path = project_root / "checkpoints" / "yd_upscale_rrdb_x4_epoch_15.pth"
+    input_path = testing_dir / "testtt.png"
     output_dir = testing_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "test_sr_x4_epoch1.png"
