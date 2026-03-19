@@ -5,19 +5,19 @@ from pathlib import Path
 import torch
 from PIL import Image
 import torchvision.transforms.functional as TF
-from realesrgan.archs.srvgg_arch import SRVGGNetCompact
-from yd_upscale.models.rrdbnet import RRDBNet
+
+from yd_upscale.models.srvggnet import SRVGGNetCompact
 
 
 def main():
     testing_dir = Path(__file__).resolve().parent
     project_root = testing_dir.parent
 
-    checkpoint_path = project_root / "checkpoints" / "yd_upscale_rrdb_x4_epoch_15.pth"
+    checkpoint_path = project_root / "checkpoints" / "YD_UPSCALE_srvgg_x4_epoch_24.pth"
     input_path = testing_dir / "testtt.png"
     output_dir = testing_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "test_sr_x4_epoch1.png"
+    output_path = output_dir / "test_srvgg_x4.png"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -31,17 +31,22 @@ def main():
     if not input_path.exists():
         raise FileNotFoundError(f"Input image not found: {input_path}")
 
-    model = RRDBNet(
-        in_nc=3,
-        out_nc=3,
-        nf=64,
-        nb=23,
-        gc=32,
-        scale=4,
+    model = SRVGGNetCompact(
+        num_in_ch=3,
+        num_out_ch=3,
+        num_feat=64,
+        num_conv=32,
+        upscale=4,
+        act_type="prelu",
     ).to(device)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+
+    if "model_state_dict" in checkpoint:
+        model.load_state_dict(checkpoint["model_state_dict"])
+    else:
+        model.load_state_dict(checkpoint)
+
     model.eval()
 
     img = Image.open(input_path).convert("RGB")
