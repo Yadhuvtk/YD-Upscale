@@ -9,7 +9,8 @@ from torch.optim import Adam
 from torch.amp import autocast, GradScaler
 
 from yd_upscale.data.dataloader_factory import build_train_val_dataloaders
-from yd_upscale.models.rrdbnet import RRDBNet
+#from yd_upscale.models.rrdbnet import RRDBNet
+from realesrgan.archs.srvgg_arch import SRVGGNetCompact
 
 
 def validate(model, val_loader, criterion, device, use_amp=True):
@@ -57,14 +58,14 @@ def main():
         patch_size_lr=patch_size_lr,
     )
 
-    model = RRDBNet(
-        in_nc=3,
-        out_nc=3,
-        nf=64,
-        nb=23,
-        gc=32,
-        scale=scale,
-    ).to(device)
+    model = SRVGGNetCompact(
+    num_in_ch=3,
+    num_out_ch=3,
+    num_feat=64,
+    num_conv=32,
+    upscale=scale,
+    act_type="prelu",
+).to(device)
 
     criterion = nn.L1Loss()
     optimizer = Adam(model.parameters(), lr=lr_rate, betas=(0.9, 0.99))
@@ -116,7 +117,8 @@ def main():
             f"Time: {elapsed/60:.2f} min\n"
         )
 
-        ckpt_path = checkpoint_dir / f"yd_upscale_rrdb_x4_epoch_{epoch}.pth"
+        #ckpt_path = checkpoint_dir / f"yd_upscale_rrdb_x4_epoch_{epoch}.pth"
+        ckpt_path = checkpoint_dir / f"YD_UPSCALE_x4_epoch_{epoch}.pth"
         torch.save(
             {
                 "epoch": epoch,
