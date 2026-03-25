@@ -542,3 +542,8 @@ def _save_checkpoint(
 
 if __name__ == "__main__":
     main()
+
+
+#To run this 
+
+# & 'e:\Yadhu Projects\YD-Upscale\YD-Upscale\runtime\python.exe' train.py --batch-size 16 --total-iter 400000 --warmup-iter 50000
