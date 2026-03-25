@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import List
 
 from PIL import Image
-import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 
@@ -27,18 +26,56 @@ class PairedImageDataset(Dataset):
         is_train: bool = True,
         online_degrade: bool = False,
     ):
-        self.lr_paths = _read_manifest(lr_manifest)
-        self.hr_paths = _read_manifest(hr_manifest)
+        lr_paths = _read_manifest(lr_manifest)
+        hr_paths = _read_manifest(hr_manifest)
 
-        if len(self.lr_paths) != len(self.hr_paths):
+        if len(lr_paths) != len(hr_paths):
             raise ValueError(
-                f"Manifest length mismatch: LR={len(self.lr_paths)} HR={len(self.hr_paths)}"
+                f"Manifest length mismatch: LR={len(lr_paths)} HR={len(hr_paths)}"
             )
 
         self.scale = scale
         self.patch_size_lr = patch_size_lr
         self.is_train = is_train
         self.online_degrade = online_degrade
+
+        self.lr_paths: List[Path] = []
+        self.hr_paths: List[Path] = []
+
+        skipped_small = 0
+        skipped_invalid = 0
+
+        for lr_path, hr_path in zip(lr_paths, hr_paths):
+            try:
+                with Image.open(hr_path) as hr_img:
+                    hr_w, hr_h = hr_img.size
+
+                if self.online_degrade:
+                    lr_w = hr_w // self.scale
+                    lr_h = hr_h // self.scale
+                else:
+                    with Image.open(lr_path) as lr_img:
+                        lr_w, lr_h = lr_img.size
+
+                if self.is_train and (lr_w < self.patch_size_lr or lr_h < self.patch_size_lr):
+                    skipped_small += 1
+                    continue
+
+                if lr_w <= 0 or lr_h <= 0:
+                    skipped_invalid += 1
+                    continue
+
+                self.lr_paths.append(lr_path)
+                self.hr_paths.append(hr_path)
+
+            except Exception:
+                skipped_invalid += 1
+                continue
+
+        print(
+            f"[PairedImageDataset] Loaded {len(self.hr_paths)} pairs "
+            f"(skipped_small={skipped_small}, skipped_invalid={skipped_invalid})"
+        )
 
     def __len__(self) -> int:
         return len(self.hr_paths)
@@ -63,7 +100,6 @@ class PairedImageDataset(Dataset):
         if hr_w == expected_hr_w and hr_h == expected_hr_h:
             return lr, hr
 
-        # Trim to the largest valid common aligned region
         fixed_hr_w = min(hr_w, expected_hr_w)
         fixed_hr_h = min(hr_h, expected_hr_h)
 

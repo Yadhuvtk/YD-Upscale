@@ -111,7 +111,7 @@ def main():
     in_nc=3,
     out_nc=3,
     nf=64,
-    nb=6,
+    nb=23,
     gc=32,
     scale=args.scale,
 ).to(device)
