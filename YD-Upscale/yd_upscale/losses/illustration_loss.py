@@ -1,72 +1,167 @@
+"""
+IllustrationLoss — perceptual loss tuned for anime / flat-colour art.
+
+Components
+----------
+1. L1 pixel loss
+   Simple mean absolute error on RGB values.
+   Keeps overall brightness and colour accurate.
+
+2. VGG perceptual loss
+   Feature-level L1 loss on intermediate activations of a frozen VGG19.
+   Layers used: relu1_2, relu2_2, relu3_4 (progressively deeper features).
+   Shallow layers capture lines/textures; deeper layers capture structure/style.
+   Weights are tuned so earlier (line-sensitive) layers have higher influence —
+   important for anime where sharp outlines matter more than photorealistic texture.
+
+No GAN/adversarial component — this is a stable pre-training / fine-tuning loss.
+
+Usage
+-----
+    criterion = IllustrationLoss(lambda_l1=1.0, lambda_percep=0.1)
+    loss = criterion(sr_batch, hr_batch)   # both in [0, 1], shape (B,3,H,W)
+"""
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as tv_models
 
 
-class CharbonnierLoss(nn.Module):
-    def __init__(self, eps: float = 1e-3):
-        super().__init__()
-        self.eps = eps
+# ---------------------------------------------------------------------------
+# VGG feature extractor (frozen)
+# ---------------------------------------------------------------------------
 
-    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        diff = pred - target
-        loss = torch.sqrt(diff * diff + self.eps * self.eps)
-        return loss.mean()
+# Layer names → indices inside vgg19.features for the activations we want.
+# relu1_2  → index  3  (after block-1 conv2 + ReLU)
+# relu2_2  → index  8  (after block-2 conv2 + ReLU)
+# relu3_4  → index 17  (after block-3 conv4 + ReLU)
+_VGG_LAYER_INDICES = [3, 8, 17]
+
+# Per-layer perceptual weights: earlier layers (lines) get higher weight for anime
+_VGG_LAYER_WEIGHTS = [0.5, 0.25, 0.25]
 
 
-class EdgeLoss(nn.Module):
+class VGGFeatureExtractor(nn.Module):
+    """
+    Extracts intermediate VGG19 features at relu1_2, relu2_2, relu3_4.
+    Weights are frozen — we only use the network as a fixed feature space.
+    """
+
     def __init__(self):
         super().__init__()
+        # Load pretrained VGG19 (ImageNet weights)
+        vgg = tv_models.vgg19(weights=tv_models.VGG19_Weights.IMAGENET1K_V1)
 
-        sobel_x = torch.tensor(
-            [[-1, 0, 1],
-             [-2, 0, 2],
-             [-1, 0, 1]],
-            dtype=torch.float32,
-        ).view(1, 1, 3, 3)
+        # Build sub-networks for each slice up to the chosen layer
+        features = vgg.features
+        self.slices = nn.ModuleList()
+        prev_end = 0
+        for idx in _VGG_LAYER_INDICES:
+            self.slices.append(nn.Sequential(*[features[i] for i in range(prev_end, idx + 1)]))
+            prev_end = idx + 1
 
-        sobel_y = torch.tensor(
-            [[-1, -2, -1],
-             [0,  0,  0],
-             [1,  2,  1]],
-            dtype=torch.float32,
-        ).view(1, 1, 3, 3)
+        # Freeze all parameters — VGG is used only as a fixed feature extractor
+        for param in self.parameters():
+            param.requires_grad = False
 
-        self.register_buffer("sobel_x", sobel_x)
-        self.register_buffer("sobel_y", sobel_y)
+        # ImageNet normalisation constants (input expected in [0, 1])
+        self.register_buffer(
+            "mean",
+            torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1),
+        )
+        self.register_buffer(
+            "std",
+            torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1),
+        )
 
-    def _to_gray(self, x: torch.Tensor) -> torch.Tensor:
-        r = x[:, 0:1, :, :]
-        g = x[:, 1:2, :, :]
-        b = x[:, 2:3, :, :]
-        return 0.299 * r + 0.587 * g + 0.114 * b
+    def _normalize(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalise from [0,1] to ImageNet mean/std."""
+        return (x - self.mean) / self.std
 
-    def _grad_mag(self, x: torch.Tensor) -> torch.Tensor:
-        x = self._to_gray(x)
+    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+        """
+        Args:
+            x: (B, 3, H, W) in [0, 1]
+        Returns:
+            List of feature maps, one per chosen layer.
+        """
+        x = self._normalize(x)
+        feats = []
+        for s in self.slices:
+            x = s(x)
+            feats.append(x)
+        return feats
 
-        sobel_x = self.sobel_x.to(device=x.device, dtype=x.dtype)
-        sobel_y = self.sobel_y.to(device=x.device, dtype=x.dtype)
 
-        gx = F.conv2d(x, sobel_x, padding=1)
-        gy = F.conv2d(x, sobel_y, padding=1)
-        return torch.sqrt(gx * gx + gy * gy + 1e-6)
+# ---------------------------------------------------------------------------
+# Perceptual Loss
+# ---------------------------------------------------------------------------
+
+class VGGPerceptualLoss(nn.Module):
+    """
+    Weighted L1 distance in VGG feature space.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = VGGFeatureExtractor()
+        self.weights = _VGG_LAYER_WEIGHTS
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        pred_edges = self._grad_mag(pred)
-        target_edges = self._grad_mag(target)
-        return F.l1_loss(pred_edges, target_edges)
+        """
+        Args:
+            pred, target: (B, 3, H, W) float tensors in [0, 1]
+        Returns:
+            Scalar perceptual loss.
+        """
+        # Stop gradients through the target path — no need to backprop into target
+        with torch.no_grad():
+            target_feats = self.extractor(target.detach())
 
+        pred_feats = self.extractor(pred)
+
+        loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        for w, pf, tf in zip(self.weights, pred_feats, target_feats):
+            loss = loss + w * F.l1_loss(pf, tf)
+        return loss
+
+
+# ---------------------------------------------------------------------------
+# Combined Illustration Loss
+# ---------------------------------------------------------------------------
 
 class IllustrationLoss(nn.Module):
-    def __init__(self, edge_weight: float = 0.3):
+    """
+    Combined loss for anime / illustration super-resolution.
+
+        loss = lambda_l1 * L1(pred, target)
+             + lambda_percep * VGG_perceptual(pred, target)
+
+    Default weights (lambda_l1=1.0, lambda_percep=0.1) keep pixel accuracy
+    dominant while letting perceptual loss improve sharpness and line quality.
+
+    Args:
+        lambda_l1     : weight on pixel-wise L1 loss (default 1.0)
+        lambda_percep : weight on VGG perceptual loss (default 0.1)
+    """
+
+    def __init__(self, lambda_l1: float = 1.0, lambda_percep: float = 0.1):
         super().__init__()
-        self.pixel_loss = CharbonnierLoss()
-        self.edge_loss = EdgeLoss()
-        self.edge_weight = edge_weight
+        self.lambda_l1     = lambda_l1
+        self.lambda_percep = lambda_percep
+        self.perceptual    = VGGPerceptualLoss()
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        pixel = self.pixel_loss(pred, target)
-        edge = self.edge_loss(pred, target)
-        return pixel + self.edge_weight * edge
+        """
+        Args:
+            pred   : (B, 3, H, W) network output, values in [0, 1]
+            target : (B, 3, H, W) ground-truth HR image, values in [0, 1]
+        Returns:
+            Scalar combined loss.
+        """
+        l1_loss      = F.l1_loss(pred, target)
+        percep_loss  = self.perceptual(pred, target)
+
+        return self.lambda_l1 * l1_loss + self.lambda_percep * percep_loss
